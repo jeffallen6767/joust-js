@@ -9,7 +9,16 @@ var
           dom: {},
           app: {},
           graphics: {},
-          game: {},
+          game: {
+            playerOne: {
+              lives: 0,
+              score: 0
+            },
+            playerTwo: {
+              lives: 0,
+              score: 0
+            }
+          },
           scene: {}
         },
         "collection": name => {
@@ -73,6 +82,47 @@ var
         },
         "debug": function(key) {
           return (inst.state.app.debug || []).indexOf(key) > -1;
+        },
+        "loadSprites": (gameCanvas) => {
+          const
+            spriteImg = inst.state.dom.sprites,
+            buffer = (() => {
+              const
+                canvas = document.createElement('canvas')
+              canvas.width = spriteImg.width
+              canvas.height = spriteImg.height
+              return canvas
+            })(),
+            ctx = buffer.getContext('2d'),
+            something = ctx.drawImage(spriteImg, 0, 0),
+            imageData = ctx.getImageData(0,0,buffer.width,  buffer.height),
+            data = imageData.data,
+            transformDarkToTransparent = (function() {
+              for (let i = 0; i < data.length; i += 4) {
+                  if (data[i]+ data[i + 1] + data[i + 2] < 80) { 
+                      data[i + 3] = 0; // alpha
+                  }
+              } 
+              ctx.putImageData(imageData, 0, 0)
+            })()
+          //inst.state.dom.game.style.backgroundColor = 'tan'
+          //gameCanvas.putImageData(imageData, 0, 0)
+          inst.state.graphics.spriteMap = buffer
+        },
+        // "stick":[322,67,50,4]
+        "drawSprite": (sprite, data) => {
+          console.log('drawSprite', sprite, data)
+          const
+            {state} = inst,
+            {graphics: {ctx, spriteMap}, app: {spriteDetails}} = state,
+            [imgX, imgY, imgW, imgH] = spriteDetails[sprite],
+            {canvasX, canvasY, canvasW, canvasH} = data
+          //console.log('coords', coords)
+          ctx.drawImage(spriteMap,
+            imgX, imgY, imgW, imgH,
+            canvasX, canvasY, canvasW, canvasH
+          )
+          //inst.state.stop = 'drawSprite... stop'
         },
         "calibrateElement": function(dat) {
           const
@@ -202,28 +252,35 @@ var
           inst.show("content");
           inst.wait("app.ready", true, function() {
             // pre-calc as much as possible
-            inst.setup();
-            // start it up
-            inst.runApp();
+            inst.setup()
             console.log("ready...");
           });
         },
         "setup": () => {
           const 
-            {app, scene} = inst.state,
-            cols = ['background', 'entities', 'gui', 'todo']
-          inst.draw()
+            {app, graphics, scene} = inst.state,
+            {spriteDetails} = app,
+            {ctx, size, scale, width, height} = graphics,
+            cols = ['background', 'platforms', 'entities', 'gui', 'todo']
+          // set-up sprites
+          ctx.clearRect(0, 0, width, height)
+          inst.loadSprites(ctx)
           cols.forEach(item => {
             scene[item] = inst.collection(item)
           })
+          inst.game()
+          inst.objects()
           // state of animation
           app.animationState = {
             
           };
           inst.addListeners()
+          //inst.draw()
           setTimeout(() => {
             inst.mode('attract')
           }, 1000)
+          // start it up
+          inst.runApp();
         },
         "addListeners": () => {
           window.addEventListener('resize', inst.resize);
@@ -316,15 +373,52 @@ var
               inst.error('inst.mode error: unknown mode [' + mode + ']')
           }
         },
-        "attract": tick => {
-          console.log('inst.attract', tick)
+        "game": () => {
           const
-            {state, now} = inst,
-            {scene} = state,
-            {todo, entities, background} = scene,
-            timestamp = now(),
-            transitionTime = 2000,
-            base = {
+            {state} = inst,
+            {game, scene} = state,
+            {todo, entities, background, platforms, gui} = scene,
+            players = [0, 'playerOne', 'playerTwo'],
+            details = {
+              playerOne: {
+                coords: {
+                  lives: [520, 728, 24, 28]
+                }
+              },
+              playerTwo: {
+                coords: {
+                  lives: [860, 728, 24, 28]
+                }
+              }
+            }
+            
+          inst.game = {
+            "add": {
+              "life": playerNum => {
+                let
+                  player = players[playerNum],
+                  coords = details[player].coords.lives,
+                  gamePlayer = game[player],
+                  lives = gamePlayer.lives + 1
+                gamePlayer.lives = lives
+                gui.add({
+                  name: player + '_life_' + lives,
+                  type: 'sprite',
+                  sprite: 'men' + playerNum,
+                  meta: {
+                    canvasX: coords[0] - (lives * 30),
+                    canvasY: coords[1],
+                    canvasW: coords[2],
+                    canvasH: coords[3]
+                  }
+                })
+              }
+            }
+          }
+        },
+        "objects": () => {
+          inst.objects = {
+            base: {
               name: 'base',
               type: 'image',
               img: inst.state.dom['base'],
@@ -333,7 +427,7 @@ var
                   metaKeys: ['imgH', 'canvasH'],
                   start: 0,
                   end: 138,
-                  ticks: transitionTime
+                  ticks: 0
                 }
               },
               meta: {
@@ -341,12 +435,45 @@ var
                 imgY: 0,
                 imgW: 833,
                 imgH: 0,
-                canvasX: 85,
-                canvasY: 700,
+                canvasX: 151,
+                canvasY: 697,
                 canvasW: 833,
                 canvasH: 0
               }
             },
+            stickOne: {
+              name: 'stickOne',
+              type: 'sprite',
+              sprite: 'stick',
+              meta: {
+                canvasX: 0,
+                canvasY: 700,
+                canvasW: 155,
+                canvasH: 8
+              }
+            },
+            stickTwo: {
+              name: 'stickTwo',
+              type: 'sprite',
+              sprite: 'stick',
+              meta: {
+                canvasX: 982,
+                canvasY: 700,
+                canvasW: 155,
+                canvasH: 8
+              }
+            }
+          }
+        },
+        "attract": tick => {
+          console.log('inst.attract', tick)
+          const
+            {state, game, objects, now} = inst,
+            {scene} = state,
+            {todo, entities, background, platforms, gui} = scene,
+            {base, stickOne, stickTwo} = objects,
+            timestamp = now(),
+            transitionTime = 2000,
             attract = {
               name: 'attract',
               start: timestamp,
@@ -356,7 +483,8 @@ var
                 switch (attract.step) {
                   case 0:
                     // add base
-                    background.add(base)
+                    base.data.height.ticks = transitionTime
+                    platforms.add(base)
                     attract.step = 1
                     break
                   case 1:
@@ -381,6 +509,40 @@ var
                       attract.step = 2
                     }
                     break
+                  case 2:
+                    platforms.add(stickOne)
+                    platforms.add(stickTwo)
+                    for (let x=1; x<4; x++) {
+                      game.add.life(1)
+                      game.add.life(2)
+                      /*
+                      gui.add({
+                        name: 'playerOneLife_' + x,
+                        type: 'sprite',
+                        sprite: 'men1',
+                        meta: {
+                          canvasX: 520 - (x * 30),
+                          canvasY: 728,
+                          canvasW: 24,
+                          canvasH: 28
+                        }
+                      })
+                      gui.add({
+                        name: 'playerTwoLife_' + x,
+                        type: 'sprite',
+                        sprite: 'men2',
+                        meta: {
+                          canvasX: 860 - (x * 30),
+                          canvasY: 728,
+                          canvasW: 24,
+                          canvasH: 28
+                        }
+                      })
+                      */
+                    }
+                    attract.step = 3
+                  case 3:
+                    
                   default:
                     // error, give useful message and stop play:
                     inst.error('inst.attract error: unknown attract.step [' + attract.step + ']')
@@ -411,11 +573,13 @@ var
             {state} = inst,
             {graphics, scene} = state,
             {ctx, size, scale, width, height} = graphics,
-            {background, entities, todo} = scene
+            {background, platforms, entities, gui} = scene
           // redraw:
           ctx.clearRect(0, 0, width, height)
           inst.paintAll(ctx, background)
+          inst.paintAll(ctx, platforms)
           inst.paintAll(ctx, entities)
+          inst.paintAll(ctx, gui)
         },
         "paintAll": function(ctx, mixed) {
           if (Array.isArray(mixed)) {
@@ -430,20 +594,25 @@ var
           console.log('paint', obj)
           const
             {scale} = inst,
-            {type, img, meta} = obj,
+            {type, img, sprite, meta} = obj,
             data = {}
           switch (type) {
             case 'collection':
               inst.paintAll(ctx, obj.items)
               break
             case 'image':
-              inst.scaleData(meta, data, ['canvasH', 'canvasY', 'canvasW', 'canvasH'])
+              inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
               console.log('paint.image, img', img, 'data', data)
               ctx.drawImage(img,
                 data.imgX, data.imgY, data.imgW, data.imgH,
                 data.canvasX, data.canvasY, data.canvasW, data.canvasH
               )
               //inst.error('just stopping')
+              break
+            case 'sprite':
+              inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
+              console.log('paint.sprite, sprite', sprite, 'data', data)
+              inst.drawSprite(sprite, data)
               break
             default:
               // error, give useful message and stop play:
@@ -466,13 +635,13 @@ var
           return data
         },
         */
-        scaleData: (obj, data, keys) => {
-          Object.keys(obj).forEach(key => {
-            if (keys.indexOf(key) === -1) {
-              data[key] = obj[key]
+        scaleData: (meta, data, keys) => {
+          Object.keys(meta).forEach(metaKey => {
+            if (keys.indexOf(metaKey) === -1) {
+              data[metaKey] = meta[metaKey]
             } else {
-              data[key] = inst.scale(
-                obj[key]
+              data[metaKey] = inst.scale(
+                meta[metaKey]
               )
             }
           })
