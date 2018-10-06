@@ -4,19 +4,55 @@ var
     var 
       CHAR_CODE_SPACE = 160,
       CHAR_SPACE = String.fromCharCode(CHAR_CODE_SPACE),
+      // add a color here to be able to render anything on the sprite sheet in that color
+      gameColors = {
+        green: {
+          hex: '#00ff00',
+          rgb: [0,255,0]
+        },
+        yellow: {
+          hex: '#f1f802',
+          rgb: [241,248,2]
+        },
+        blue: {
+          hex: '#08b9f0',
+          rgb: [8,185,240]
+        }
+      },
       inst = {
-        "state": {
+        state: {
           dom: {},
           app: {},
-          graphics: {},
+          graphics: {
+            text: 0,
+            spriteMap: {}
+          },
           game: {
             playerOne: {
-              lives: 0,
-              score: 0
+              color: 'yellow',
+              knight: 'player1',
+              bird: 'ostrich',
+              lives: {
+                num: 0,
+                coords: [500, 728, 24, 28]
+              },
+              score: {
+                num: 0,
+                coords: [400, 730, 2, 2]
+              }
             },
             playerTwo: {
-              lives: 0,
-              score: 0
+              color: 'blue',
+              knight: 'player2',
+              bird: 'stork',
+              lives: {
+                num: 0,
+                coords: [850, 728, 24, 28]
+              },
+              score: {
+                num: 0,
+                coords: [750, 730, 2, 2]
+              }
             }
           },
           scene: {}
@@ -45,13 +81,17 @@ var
                 if (!(name in obj.refs)) {
                   inst.error('inst.collection.remove error [', obj.name, '][', name, '] does not exist:', {obj, item})
                 } else {
-                  obj.items = obj.items.filter(item, idx => {
+                  obj.items = obj.items.filter((item, idx) => {
                     if (idx > itemIdx) {
                       --obj.refs[item.name]
                     }
                     return item.name !== name
                   })
                 }
+              },
+              empty: () => {
+                obj.items = []
+                obj.refs = {}
               }
             }
           return obj
@@ -85,29 +125,60 @@ var
         },
         "loadSprites": (gameCanvas) => {
           const
-            spriteImg = inst.state.dom.sprites,
-            buffer = (() => {
+            transformImage = (spriteImg, mapKey, filter) => {
               const
-                canvas = document.createElement('canvas')
-              canvas.width = spriteImg.width
-              canvas.height = spriteImg.height
-              return canvas
-            })(),
-            ctx = buffer.getContext('2d'),
-            something = ctx.drawImage(spriteImg, 0, 0),
-            imageData = ctx.getImageData(0,0,buffer.width,  buffer.height),
-            data = imageData.data,
-            transformDarkToTransparent = (function() {
-              for (let i = 0; i < data.length; i += 4) {
-                  if (data[i]+ data[i + 1] + data[i + 2] < 80) { 
-                      data[i + 3] = 0; // alpha
-                  }
-              } 
-              ctx.putImageData(imageData, 0, 0)
-            })()
-          //inst.state.dom.game.style.backgroundColor = 'tan'
-          //gameCanvas.putImageData(imageData, 0, 0)
-          inst.state.graphics.spriteMap = buffer
+                {width, height} = spriteImg,
+                getBufferAndCtx = () => {
+                  const
+                    buffer = (() => {
+                      const
+                        canvas = document.createElement('canvas')
+                      canvas.width = width
+                      canvas.height = height
+                      return canvas
+                    })(),
+                    ctx = (() => {
+                      const
+                        bufCtx = buffer.getContext('2d')
+                      bufCtx.drawImage(spriteImg, 0, 0)
+                      return bufCtx
+                    })()
+                  return {buffer, ctx}
+                },
+                {buffer, ctx} = getBufferAndCtx(),
+                imageData = ctx.getImageData(0, 0, width, height),
+                data = imageData.data,
+                transform = () => {
+                  for (let i = 0; i < data.length; i += 4) {
+                    filter(data, i)
+                  } 
+                  ctx.putImageData(imageData, 0, 0)
+                }
+              transform()
+              inst.state.graphics.spriteMap[mapKey] = buffer
+              return buffer
+            },
+            // initial is for alpha transparency:
+            whiteBuf = transformImage(inst.state.dom.sprites, 'white', (data, i) => {
+              if (data[i] + data[i+1] + data[i+2] < 80) {
+                // alpha
+                data[i+3] = 0
+              }
+            })
+          // the rest of these just transform the entire map into a solid color:
+          // these are used for player colored stuff like score, lives, etc...
+          Object.keys(gameColors).forEach(key => {
+            const
+              {rgb: [red, green, blue]} = gameColors[key]
+            transformImage(whiteBuf, key, (data, i) => {
+              // not transparent
+              if (data[i+3] > 0) {
+                data[i] = red
+                data[i+1] = green
+                data[i+2] = blue
+              }
+            })
+          })
         },
         // "stick":[322,67,50,4]
         "drawSprite": (sprite, data) => {
@@ -116,13 +187,59 @@ var
             {state} = inst,
             {graphics: {ctx, spriteMap}, app: {spriteDetails}} = state,
             [imgX, imgY, imgW, imgH] = spriteDetails[sprite],
-            {canvasX, canvasY, canvasW, canvasH} = data
+            {canvasX, canvasY, canvasW, canvasH, color} = data
           //console.log('coords', coords)
-          ctx.drawImage(spriteMap,
+          ctx.drawImage(spriteMap[color || 'white'],
             imgX, imgY, imgW, imgH,
             canvasX, canvasY, canvasW, canvasH
           )
           //inst.state.stop = 'drawSprite... stop'
+        },
+        /*
+        {
+          font: 'bigfont',
+          text: String(num),
+          coords,
+          color,
+          direction: -1,
+          spacing: 40
+        }
+        */
+        getImageData: (details, color) => {
+          const
+            colorMap = inst.state.graphics.spriteMap[color],
+            colorCtx = colorMap.getContext('2d'),
+            [imgX, imgY, imgW, imgH] = details,
+            data = colorCtx.getImageData(imgX, imgY, imgW, imgH)
+          return {data, colorMap, colorCtx}
+        },
+        getText: text => {
+          const
+            {state} = inst,
+            {graphics, app: {spriteDetails}} = state,
+            {ctx, spriteMap} = graphics,
+            result = text.map((data, idx) => {
+              const
+                {sprite, color, coords: [x, y, wFactor, hFactor]} = data,
+                details = spriteDetails[sprite],
+                [imgX, imgY, imgW, imgH] = details,
+                graphicsTextNumber = (++graphics.text),
+                spriteCharacter = {
+                  type: 'sprite',
+                  name: sprite + '_' + idx + '_' + graphicsTextNumber,
+                  sprite: sprite,
+                  meta: {
+                    color,
+                    canvasX: x,
+                    canvasY: y,
+                    canvasW: imgW * wFactor,
+                    canvasH: imgH * hFactor
+                  }
+                }
+              return spriteCharacter
+            })
+          //console.log("getText", result)
+          return result
         },
         "calibrateElement": function(dat) {
           const
@@ -261,7 +378,7 @@ var
             {app, graphics, scene} = inst.state,
             {spriteDetails} = app,
             {ctx, size, scale, width, height} = graphics,
-            cols = ['background', 'platforms', 'entities', 'gui', 'todo']
+            cols = ['background', 'platforms', 'entities', 'characters', 'gui', 'todo']
           // set-up sprites
           ctx.clearRect(0, 0, width, height)
           inst.loadSprites(ctx)
@@ -364,6 +481,7 @@ var
         },
         "mode": mode => {
           console.log('inst.mode', mode)
+          inst.game.reset()
           switch (mode) {
             case 'attract':
               inst.attract()
@@ -377,41 +495,133 @@ var
           const
             {state} = inst,
             {game, scene} = state,
-            {todo, entities, background, platforms, gui} = scene,
-            players = [0, 'playerOne', 'playerTwo'],
-            details = {
-              playerOne: {
+            {todo, characters, entities, background, platforms, gui} = scene,
+            players = ['playerOne', 'playerTwo']
+          // create
+          inst.game = {
+            "getDefaultPlayer": (num, data) => {
+              return {
+                direction: 1,
+                state: 4,
                 coords: {
-                  lives: [520, 728, 24, 28]
-                }
-              },
-              playerTwo: {
-                coords: {
-                  lives: [860, 728, 24, 28]
+                  x: 500,
+                  y: 700
                 }
               }
-            }
-            
-          inst.game = {
-            "add": {
+            },
+            "reset": () => {
+              players.forEach(player => {
+                const
+                  gamePlayer = game[player]
+                gamePlayer.score.num = 0
+                gamePlayer.lives.num = 0
+              })
+              Object.values(scene).forEach(part => {
+                part.empty()
+              })
+            },
+            "remove": {
               "life": playerNum => {
-                let
-                  player = players[playerNum],
-                  coords = details[player].coords.lives,
+                const
+                  player = players[playerNum - 1],
                   gamePlayer = game[player],
-                  lives = gamePlayer.lives + 1
-                gamePlayer.lives = lives
+                  {num, coords} = gamePlayer.lives
+                gamePlayer.lives.num -= 1
+                gui.remove({
+                  name: player + '_life_' + num
+                })
+              }
+            },
+            "add": {
+              "score": playerNum => {
+                const
+                  player = players[playerNum - 1],
+                  gamePlayer = game[player],
+                  {num, coords} = gamePlayer.score,
+                  color = gamePlayer.color
                 gui.add({
-                  name: player + '_life_' + lives,
+                  name: player + '_score',
+                  type: 'collection',
+                  items: inst.getText(
+                    String(num).split('').map((letter, idx) => {
+                      return {
+                        sprite: 'bigfont' + letter.toUpperCase(), 
+                        color,
+                        coords: [
+                          coords[0] - (40 * idx),
+                          coords[1],
+                          coords[2],
+                          coords[3]
+                        ]
+                      }
+                    })
+                  )
+                })
+              },
+              "life": playerNum => {
+                const
+                  player = players[playerNum - 1],
+                  gamePlayer = game[player],
+                  {num, coords} = gamePlayer.lives
+                gamePlayer.lives.num += 1
+                gui.add({
+                  name: player + '_life_' + num,
                   type: 'sprite',
                   sprite: 'men' + playerNum,
                   meta: {
-                    canvasX: coords[0] - (lives * 30),
+                    canvasX: coords[0] - (num * 30),
                     canvasY: coords[1],
                     canvasW: coords[2],
                     canvasH: coords[3]
                   }
                 })
+              },
+              "player": (playerNum, data) => {
+                const
+                  player = players[playerNum - 1],
+                  {knight, bird, lives} = game[player],
+                  {num, coords} = lives
+                if (num > 0) {
+                  inst.game.remove.life(playerNum)
+                  const
+                    defaultPlayer = inst.game.getDefaultPlayer(playerNum, data),
+                    playerCoords = data.coords || defaultPlayer.coords,
+                    playerDirection = data.direction || defaultPlayer.direction,
+                    playerState = data.state || defaultPlayer.state,
+                    playerSprite = [{
+                      name: player + '_A',
+                      type: 'sprite',
+                      sprite: knight + playerDirection,
+                      meta: {
+                        canvasX: playerCoords.x + 20,
+                        canvasY: playerCoords.y - 2,
+                        canvasW: 56,
+                        canvasH: 28
+                      }
+                    }, {
+                      name: player + '_B',
+                      type: 'sprite',
+                      sprite: bird + playerState,
+                      meta: {
+                        canvasX: playerCoords.x,
+                        canvasY: playerCoords.y,
+                        canvasW: 72,
+                        canvasH: 80
+                      }
+                    }],
+                    playerObj = {
+                      num: playerNum,
+                      state: playerState,
+                      dir: playerDirection,
+                      coords: playerCoords,
+                      sprite: playerSprite,
+                      update: now => {
+                        console.log('update player', playerNum)
+                      }
+                    }
+                  todo.add(playerObj)
+                  characters.add(playerSprite)
+                }
               }
             }
           }
@@ -473,7 +683,7 @@ var
             {todo, entities, background, platforms, gui} = scene,
             {base, stickOne, stickTwo} = objects,
             timestamp = now(),
-            transitionTime = 2000,
+            transitionTime = 1000,
             attract = {
               name: 'attract',
               start: timestamp,
@@ -515,33 +725,20 @@ var
                     for (let x=1; x<4; x++) {
                       game.add.life(1)
                       game.add.life(2)
-                      /*
-                      gui.add({
-                        name: 'playerOneLife_' + x,
-                        type: 'sprite',
-                        sprite: 'men1',
-                        meta: {
-                          canvasX: 520 - (x * 30),
-                          canvasY: 728,
-                          canvasW: 24,
-                          canvasH: 28
-                        }
-                      })
-                      gui.add({
-                        name: 'playerTwoLife_' + x,
-                        type: 'sprite',
-                        sprite: 'men2',
-                        meta: {
-                          canvasX: 860 - (x * 30),
-                          canvasY: 728,
-                          canvasW: 24,
-                          canvasH: 28
-                        }
-                      })
-                      */
                     }
+                    game.add.score(1)
+                    game.add.score(2)
                     attract.step = 3
                   case 3:
+                    game.add.player(1, {
+                      coords: {
+                        x: 350,
+                        y: 622
+                      }
+                    })
+                    attract.step = 4
+                  case 4:
+                    
                     
                   default:
                     // error, give useful message and stop play:
@@ -573,12 +770,13 @@ var
             {state} = inst,
             {graphics, scene} = state,
             {ctx, size, scale, width, height} = graphics,
-            {background, platforms, entities, gui} = scene
+            {background, platforms, entities, characters, gui} = scene
           // redraw:
           ctx.clearRect(0, 0, width, height)
           inst.paintAll(ctx, background)
           inst.paintAll(ctx, platforms)
           inst.paintAll(ctx, entities)
+          inst.paintAll(ctx, characters)
           inst.paintAll(ctx, gui)
         },
         "paintAll": function(ctx, mixed) {
@@ -594,7 +792,7 @@ var
           console.log('paint', obj)
           const
             {scale} = inst,
-            {type, img, sprite, meta} = obj,
+            {type, img, sprite, meta, details, refs} = obj,
             data = {}
           switch (type) {
             case 'collection':
@@ -612,7 +810,24 @@ var
             case 'sprite':
               inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
               console.log('paint.sprite, sprite', sprite, 'data', data)
+              // this works!
+              //data.color = 'green'
               inst.drawSprite(sprite, data)
+              break
+            case 'data':
+              inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
+              console.log('paint.data, meta', meta, 'data', data, 'details', details)
+              ctx.drawImage(refs.colorMap,
+                details.imgX, details.imgY, details.imgW, details.imgH,
+                data.canvasX, data.canvasY, data.canvasW, data.canvasH
+              )
+              /*
+              ctx.putImageData(obj.data,
+                data.canvasX, data.canvasY,
+                0, 0,
+                data.canvasW, data.canvasH
+              )
+              */
               break
             default:
               // error, give useful message and stop play:
