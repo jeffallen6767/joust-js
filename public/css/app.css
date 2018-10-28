@@ -54,7 +54,7 @@ div#wrap {
 canvas#game {
   margin: 26px auto 0px auto;
   vertical-align: top;
-  border: 1px dotted red;
+  /* border: 1px dotted red; */
 }
 
 .column {

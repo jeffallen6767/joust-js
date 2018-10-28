@@ -5,20 +5,14 @@ var
       DEBUG = true,
       CHAR_CODE_SPACE = 160,
       CHAR_SPACE = String.fromCharCode(CHAR_CODE_SPACE),
+      GRAVITY = 9.8,
+      FLAP_POWER = -10,
       // add a color here to be able to render anything on the sprite sheet in that color
       gameColors = {
-        green: {
-          hex: '#00ff00',
-          rgb: [0,255,0]
-        },
-        yellow: {
-          hex: '#f1f802',
-          rgb: [241,248,2]
-        },
-        blue: {
-          hex: '#08b9f0',
-          rgb: [8,185,240]
-        }
+        red: [255, 0, 0],
+        green: [0,255,0],
+        blue: [8,185,240],
+        yellow: [241,248,2]
       },
       inst = {
         log: (...args) => {
@@ -31,7 +25,8 @@ var
           app: {},
           graphics: {
             text: 0,
-            spriteMap: {}
+            spriteMap: {},
+            colorOverride: false
           },
           game: {
             playerOne: {
@@ -40,7 +35,8 @@ var
               bird: 'ostrich',
               lives: {
                 num: 0,
-                coords: [500, 728, 24, 28]
+                coords: [425, 728, 24, 28],
+                offset: 25
               },
               score: {
                 num: 0,
@@ -53,7 +49,8 @@ var
               bird: 'stork',
               lives: {
                 num: 0,
-                coords: [850, 728, 24, 28]
+                coords: [775, 728, 24, 28],
+                offset: 25
               },
               score: {
                 num: 0,
@@ -94,6 +91,14 @@ var
                     return item.name !== name
                   })
                 }
+              },
+              get: name => {
+                const
+                  idx = obj.refs[name]
+                if (idx) {
+                  return obj.items[idx - 1]
+                }
+                inst.error('inst.collection.get error [' + obj.name + '][' + name + '] does NOT exist:', {obj, name})
               },
               empty: () => {
                 obj.items = []
@@ -165,7 +170,7 @@ var
               return buffer
             },
             // initial is for alpha transparency:
-            whiteBuf = transformImage(inst.state.dom.sprites, 'white', (data, i) => {
+            alphaBuf = transformImage(inst.state.dom.sprites, '_ALPHA_', (data, i) => {
               if (data[i] + data[i+1] + data[i+2] < 80) {
                 // alpha
                 data[i+3] = 0
@@ -175,8 +180,11 @@ var
           // these are used for player colored stuff like score, lives, etc...
           Object.keys(gameColors).forEach(key => {
             const
-              {rgb: [red, green, blue]} = gameColors[key]
-            transformImage(whiteBuf, key, (data, i) => {
+              rgb = gameColors[key],
+              [red, green, blue] = typeof rgb === 'function'
+                ? rgb(inst)
+                : rgb
+            transformImage(alphaBuf, key, (data, i) => {
               // not transparent
               if (data[i+3] > 0) {
                 data[i] = red
@@ -191,11 +199,13 @@ var
           inst.log('drawSprite', sprite, data)
           const
             {state} = inst,
-            {graphics: {ctx, spriteMap}, app: {spriteDetails}} = state,
+            {graphics: {ctx, spriteMap, colorOverride}, app: {spriteDetails}} = state,
             [imgX, imgY, imgW, imgH] = spriteDetails[sprite],
-            {canvasX, canvasY, canvasW, canvasH, color} = data
+            {canvasX, canvasY, canvasW, canvasH, color} = data,
+            spriteColor = colorOverride || color || '_ALPHA_',
+            colorMap = spriteMap[spriteColor]
           //inst.log('coords', coords)
-          ctx.drawImage(spriteMap[color || 'white'],
+          ctx.drawImage(colorMap,
             imgX, imgY, imgW, imgH,
             canvasX, canvasY, canvasW, canvasH
           )
@@ -505,6 +515,13 @@ var
             players = ['playerOne', 'playerTwo']
           // create
           inst.game = {
+            get: {
+              player: num => {
+                return todo.get(
+                  players[num - 1]
+                )
+              }
+            },
             "getDefaultPlayer": (num, data) => {
               return {
                 direction: num === 1 ? 1 : 2,
@@ -568,14 +585,14 @@ var
                 const
                   player = players[playerNum - 1],
                   gamePlayer = game[player],
-                  {num, coords} = gamePlayer.lives
+                  {num, coords, offset} = gamePlayer.lives
                 gamePlayer.lives.num += 1
                 gui.add({
                   name: player + '_life_' + num,
                   type: 'sprite',
                   sprite: 'men' + playerNum,
                   meta: {
-                    canvasX: coords[0] - (num * 30),
+                    canvasX: coords[0] + (num * offset),
                     canvasY: coords[1],
                     canvasW: coords[2],
                     canvasH: coords[3]
@@ -586,51 +603,119 @@ var
                 const
                   player = players[playerNum - 1],
                   {knight, bird, lives} = game[player],
-                  {num, coords} = lives
+                  {num} = lives
                 if (num > 0) {
                   inst.game.remove.life(playerNum)
                   const
                     defaultPlayer = inst.game.getDefaultPlayer(playerNum, data),
-                    playerCoords = data.coords || defaultPlayer.coords,
-                    playerDirection = data.direction || defaultPlayer.direction,
-                    playerState = data.state || defaultPlayer.state,
+                    now = inst.now(),
+                    playerMeta = {
+                      now,
+                      next: now,
+                      wait: false,
+                      doing: 'standing',
+                      coords: data.coords || defaultPlayer.coords,
+                      direction: data.direction || defaultPlayer.direction,
+                      state: data.state || defaultPlayer.state,
+                      delta: {x:0, y:0},
+                      canvas: {
+                        w: 56,
+                        h: 28
+                      },
+                      knight: {
+                        get: extra => {
+                          return {
+                            name: player + '_A',
+                            type: 'sprite',
+                            sprite: knight + playerMeta.direction,
+                            meta: {
+                              //  + 20
+                              canvasX: playerMeta.coords.x,
+                              //  - 2
+                              canvasY: playerMeta.coords.y,
+                              canvasW: playerMeta.canvas.w,
+                              canvasH: playerMeta.canvas.h
+                            }
+                          }
+                        }
+                      },
+                      bird: {
+                        get: extra => {
+                          const
+                            birdIdx = (playerMeta.state + (playerMeta.direction === 1 ? 0 : 7)),
+                            birdSprite = bird + birdIdx,
+                            spriteDetails = inst.state.app.spriteDetails[birdSprite],
+                            cW = spriteDetails[2] * 2,
+                            cH = spriteDetails[3] * 2
+                          return {
+                            name: player + '_B',
+                            type: 'sprite',
+                            sprite: bird + birdIdx,
+                            meta: {
+                              //  + (playerDirection )
+                              canvasX: playerMeta.coords.x + ((playerMeta.direction - 2) * 20),
+                              canvasY: playerMeta.coords.y,
+                              canvasW: cW,
+                              canvasH: cH
+                              //canvasW: 72,
+                              //canvasH: 80
+                            }
+                          }
+                        }
+                      }
+                    },
                     playerSprite = {
                       type: 'collection',
                       name: player + '_sprite',
-                      items: [{
-                        name: player + '_A',
-                        type: 'sprite',
-                        sprite: knight + playerDirection,
-                        meta: {
-                          //  + 20
-                          canvasX: playerCoords.x,
-                          //  - 2
-                          canvasY: playerCoords.y,
-                          canvasW: 56,
-                          canvasH: 28
-                        }
-                      }, {
-                        name: player + '_B',
-                        type: 'sprite',
-                        sprite: bird + (playerState + (playerDirection === 1 ? 0 : 7)),
-                        meta: {
-                          //  + (playerDirection )
-                          canvasX: playerCoords.x + ((playerDirection - 2) * 20),
-                          canvasY: playerCoords.y,
-                          canvasW: 72,
-                          canvasH: 80
-                        }
-                      }]
+                      items: extra => {
+                        return [playerMeta.knight.get(extra), playerMeta.bird.get(extra)]
+                      }
                     },
                     playerObj = {
                       name: player,
                       num: playerNum,
-                      state: playerState,
-                      dir: playerDirection,
-                      coords: playerCoords,
+                      state: playerMeta.state,
+                      dir: playerMeta.direction,
+                      coords: playerMeta.coords,
                       sprite: playerSprite,
+                      meta: playerMeta,
                       update: now => {
                         inst.log('update player', playerNum)
+                        switch (playerMeta.doing) {
+                          case 'standing':
+
+                            break
+                          case 'flap_up':
+                            playerMeta.delta.y += FLAP_POWER
+                            playerMeta.state = 7
+                            playerMeta.wait = nextTime => {
+                              if (nextTime > now + 100) {
+                                playerMeta.doing = 'flap_down'
+                                return true
+                              }
+                              return false
+                            }
+                            playerMeta.doing = false
+                            break
+                          case 'flap_down':
+                            playerMeta.state = 6
+
+                          default:
+                            // no operation
+                            break
+                        }
+                        // calc physics
+                        inst.calcPhysics(playerObj, now)
+                        // last
+                        if (typeof playerMeta.wait === 'function' && playerMeta.wait(now)) {
+                          playerMeta.wait = false
+                        }
+                      },
+                      api: {
+                        flap: meta => {
+                          inst.log(player, 'flap', meta)
+                          playerMeta.doing = 'flap_up'
+                        }
                       }
                     }
                   inst.log("add.player " + playerNum, "data", data, "playerObj",  playerObj, "playerSprite", playerSprite)
@@ -640,6 +725,9 @@ var
               }
             }
           }
+        },
+        calcPhysics: (obj, now) => {
+
         },
         "objects": () => {
           inst.objects = {
@@ -699,6 +787,7 @@ var
             {base, stickOne, stickTwo} = objects,
             timestamp = now(),
             transitionTime = 1000,
+            availableColors = Object.keys(gameColors).concat(['_ALPHA_']),
             attract = {
               name: 'attract',
               start: timestamp,
@@ -711,6 +800,7 @@ var
                 }, intTimeDelay)
               },
               update: time => {
+                inst.log('inst.attract.update time', time)
                 switch (attract.step) {
                   case -1:
                     // used for delays, nothing to do...
@@ -762,7 +852,7 @@ var
                     attract.delay(4, 500)
                     break
                   case 4:
-                    // add player one
+                    // add player one & two
                     game.add.player(1, {
                       coords: {
                         x: 350,
@@ -778,7 +868,19 @@ var
                     attract.delay(5, 500)
                     break
                   case 5:
-                    // next?
+                    // flap player one
+                    inst.log('game', game)
+                    inst.log('inst', inst)
+                    const
+                      playerOne = game.get.player(1)
+                    inst.log('playerOne', playerOne)
+                    playerOne.api.flap()
+                    attract.step = 6
+                    break
+                  case 6:
+                     // wait one second
+                     attract.delay(7, 1000)
+                     break
                   default:
                     // error, give useful message and stop play:
                     inst.error('inst.attract error: unknown attract.step [' + attract.step + ']')
@@ -787,6 +889,7 @@ var
             }
           todo.add(attract)
         },
+        //inst.state.graphics.colorOverride = inst.randomChoice(availableColors)
         // once per frame, calc and show the next state
         "drawNextFrame": function(now) {
           inst.nextState(now);
@@ -798,6 +901,7 @@ var
           const
             {scene} = inst.state,
             {todo} = scene
+          inst.log('nextState todo', todo)
           todo.items.forEach(item => {
             item.update(now)
           })
@@ -820,39 +924,51 @@ var
         },
         "paintAll": function(ctx, mixed) {
           if (Array.isArray(mixed)) {
+            inst.log('paintAll array', mixed)
             mixed.forEach(item => {
               inst.paintAll(ctx, item)
             })
           } else {
+            inst.log('paintAll else', mixed)
             inst.paint(ctx, mixed)
           }
         },
         "paint": (ctx, obj) => {
+          try {
           inst.log('paint', obj)
-          const
-            {scale} = inst,
-            {type, img, sprite, meta, details, refs} = obj,
-            data = {}
-          switch (type) {
-            case 'collection':
-              inst.paintAll(ctx, obj.items)
-              break
-            case 'image':
-              inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
-              inst.log('paint.image, img', img, 'data', data)
-              ctx.drawImage(img,
-                data.imgX, data.imgY, data.imgW, data.imgH,
-                data.canvasX, data.canvasY, data.canvasW, data.canvasH
-              )
-              break
-            case 'sprite':
-              inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
-              inst.log('paint.sprite, sprite', sprite, 'data', data)
-              inst.drawSprite(sprite, data)
-              break
-            default:
-              // error, give useful message and stop play:
-              inst.error('inst.paint error: unknown type [' + type + '], data=', obj)
+            const
+              {scale} = inst,
+              {type, items: i, img, sprite, meta, details, refs} = obj,
+              iType = typeof i,
+              iFunc = iType === 'function',
+              items = iFunc ? i(ctx) : i,
+              data = {}
+            inst.log('paint items', items)
+            switch (type) {
+              case 'collection':
+                inst.paintAll(ctx, items)
+                break
+              case 'image':
+                inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
+                inst.log('paint.image, img', img, 'data', data)
+                ctx.drawImage(img,
+                  data.imgX, data.imgY, data.imgW, data.imgH,
+                  data.canvasX, data.canvasY, data.canvasW, data.canvasH
+                )
+                break
+              case 'sprite':
+                inst.scaleData(meta, data, ['canvasX', 'canvasY', 'canvasW', 'canvasH'])
+                inst.log('paint.sprite, sprite', sprite, 'data', data)
+                //data.color = 'grey'
+                inst.drawSprite(sprite, data)
+                break
+              default:
+                // error, give useful message and stop play:
+                inst.error('inst.paint error: unknown type [' + type + '], data=', obj)
+            }
+          } catch (e) {
+            inst.log('caught error in paint', obj)
+            inst.error(e)
           }
         },
         scaleData: (meta, data, keys) => {
