@@ -2,11 +2,11 @@
 var
   Application = (function() {
     var 
-      DEBUG = true,
+      DEBUG = false,
       CHAR_CODE_SPACE = 160,
       CHAR_SPACE = String.fromCharCode(CHAR_CODE_SPACE),
-      GRAVITY = 9.8,
-      FLAP_POWER = -10,
+      GRAVITY = 98,
+      FLAP_POWER = -2,
       // add a color here to be able to render anything on the sprite sheet in that color
       gameColors = {
         red: [255, 0, 0],
@@ -320,11 +320,14 @@ var
             };
           check();
         },
+        getDom: key => {
+          return inst.state.dom[key]
+        },
         "show": function(key) {
-          inst.state.dom[key].classList.remove("hidden");
+          inst.getDom(key).classList.remove("hidden");
         },
         "hide": function(key) {
-          inst.state.dom[key].classList.add("hidden");
+          inst.getDom(key).classList.add("hidden");
         },
         "resize": function() {
           // get computed style for image
@@ -374,12 +377,26 @@ var
             "half:", fw/2, "x", fh/2
             );
         },
+        controls: () => {
+          inst.getDom('control').addEventListener('click', e => {
+            const
+              state = inst.state.app.animationState
+            if (state.stop) {
+              state.stop = false
+              inst.animate(state.lastDrawTime)
+            } else {
+              state.stop = 'stop animating via control button...'
+            }
+          })
+        },
         "init": function(conf) {
           if (typeof conf === "object") {
             Object.keys(conf).forEach(function(key) {
               inst.configure[key](conf[key]);
             });
           }
+          // wire controls:
+          inst.controls();
           inst.resize();
           inst.show("root");
           inst.show("content");
@@ -472,7 +489,7 @@ var
               elapsed = now - state.lastDrawTime;
             // are we requested to stop after N frames? ( debugging )
             if (state.stop || (maxFrame && (state.frameCount > maxFrame))) {
-              inst.log("animate stop @ " + state.frameCount + ", msg: " + state.stop);
+              console.log("animate stop @ " + state.frameCount + ", msg: " + state.stop);
             } else {
               // request another frame
               state.requestID = requestAnimationFrame(inst.animate);
@@ -713,7 +730,7 @@ var
                       },
                       api: {
                         flap: meta => {
-                          inst.log(player, 'flap', meta)
+                          console.log('--------------->', player, 'flap', meta)
                           playerMeta.doing = 'flap_up'
                         }
                       }
@@ -727,7 +744,34 @@ var
           }
         },
         calcPhysics: (obj, now) => {
-
+          if (obj.name !== 'playerOne') {
+            return
+          }
+          console.log('calcPhysics', obj, now)
+          const
+            {meta: {coords, delta, next, doing}} = obj,
+            elapsed = (now - next) / 1000,
+            eSquared = elapsed * elapsed,
+            gravityAdjustment = GRAVITY * eSquared
+          // adjust timestamp
+          obj.meta.next = now
+          // new position
+          coords.x += delta.x
+          coords.y += delta.y
+          // check
+          if (doing === 'standing') {
+            // for now, just don't move
+          } else {
+            // adjust for gravity:
+            delta.y += gravityAdjustment
+          }
+          
+          // TODO: adjust for drag?
+          console.log('coords', coords)
+          console.log('delta', delta)
+          console.log('elapsed', elapsed)
+          console.log('eSquared', eSquared)
+          console.log('gravity adjustment', gravityAdjustment)
         },
         "objects": () => {
           inst.objects = {
@@ -878,9 +922,13 @@ var
                     attract.step = 6
                     break
                   case 6:
-                     // wait one second
-                     attract.delay(7, 1000)
-                     break
+                    // wait 1/10th of a second
+                    attract.delay(7, 100)
+                    break
+                  case 7:
+                    // wait 1/10th of a second
+                    attract.delay(5, 540)
+                    break
                   default:
                     // error, give useful message and stop play:
                     inst.error('inst.attract error: unknown attract.step [' + attract.step + ']')

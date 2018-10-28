@@ -51,6 +51,21 @@ div#wrap {
   vertical-align: top;
 }
 
+div#controls {
+  position: fixed;
+  left: 0px;
+  top: 0px;
+}
+
+.button {
+  background-color: #aaaaaa;
+  color: #000000;
+  padding: 10px;
+  margin: 10px;
+  border: 2px white solid;
+  cursor: pointer;
+}
+
 canvas#game {
   margin: 26px auto 0px auto;
   vertical-align: top;
